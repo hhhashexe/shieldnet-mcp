@@ -1,0 +1,57 @@
+# agentgateway configuration for ShieldNet MCP Security Scanner
+# This config routes AI agent requests through ShieldNet for security governance
+
+listeners:
+  - name: secure-agent-gateway
+    protocol: A2A  # Agent-to-Agent protocol
+    address: 0.0.0.0:8080
+
+targets:
+  - name: shieldnet-security
+    provider:
+      type: mcp
+      config:
+        command: node
+        args: ["src/index.js"]
+        cwd: "."
+
+  - name: downstream-agent
+    provider:
+      type: a2a
+      config:
+        url: "${DOWNSTREAM_AGENT_URL}"
+
+policies:
+  # Security governance: scan before allowing agent interactions
+  - name: pre-request-security-check
+    type: guardrail
+    config:
+      # Before any agent connects to external service, run ShieldNet scan
+      trigger: pre_request
+      action: |
+        Use shieldnet-security.assess_risk to evaluate the target URL.
+        If decision is BLOCK → reject the request.
+        If decision is WARN → log warning and proceed.
+        If decision is ALLOW → proceed normally.
+
+  - name: input-validation
+    type: guardrail
+    config:
+      # Validate inputs for injection attacks
+      trigger: pre_request
+      patterns:
+        - "<script"
+        - "javascript:"
+        - "' OR "
+        - "../"
+        - "{{constructor"
+      action: block
+      message: "ShieldNet: Potentially malicious input detected"
+
+  - name: output-sanitization
+    type: guardrail
+    config:
+      trigger: post_response
+      action: |
+        Scan response for sensitive data exposure (API keys, tokens, PII).
+        If found → redact and log warning.

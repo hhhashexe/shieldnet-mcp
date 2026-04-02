@@ -1,0 +1,19 @@
+{
+  "name": "shieldnet-mcp",
+  "version": "1.0.0",
+  "description": "ShieldNet Security Scanner — MCP Server for AI Agent Security Governance",
+  "main": "src/index.js",
+  "type": "module",
+  "bin": {
+    "shieldnet-mcp": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": ["mcp", "security", "scanner", "ai-agent", "agentgateway", "governance"],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}
