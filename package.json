@@ -1,11 +1,11 @@
 {
   "name": "shieldnet-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "ShieldNet Security Scanner — MCP Server for AI Agent Security Governance. Scans URLs for XSS, SQLi, SSTI, CORS misconfig, missing headers, info disclosure, and more. Returns ALLOW/WARN/BLOCK governance decisions.",
   "main": "src/index.js",
   "type": "module",
   "bin": {
-    "shieldnet-mcp": "./src/index.js"
+    "shieldnet-mcp": "src/index.js"
   },
   "scripts": {
     "start": "node src/index.js",
@@ -30,7 +30,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/hhhashexe/shieldnet-mcp.git"
+    "url": "git+https://github.com/hhhashexe/shieldnet-mcp.git"
   },
   "bugs": {
     "url": "https://github.com/hhhashexe/shieldnet-mcp/issues"

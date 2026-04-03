@@ -6,6 +6,7 @@
 
 <div align="center">
 
+[![CI](https://github.com/hhhashexe/shieldnet-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/hhhashexe/shieldnet-mcp/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/shieldnet.svg)](https://www.npmjs.com/package/shieldnet)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![tests](https://img.shields.io/badge/tests-75%20passing-brightgreen.svg)](./test/)

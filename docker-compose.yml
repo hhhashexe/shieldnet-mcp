@@ -1,0 +1,51 @@
+# ═══════════════════════════════════════════════════
+# ShieldNet MCP — docker-compose.yml
+# ═══════════════════════════════════════════════════
+
+services:
+  # ── Main MCP server (stdio) ─────────────────────
+  shieldnet-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: shieldnet-mcp:latest
+    container_name: shieldnet-mcp
+    stdin_open: true   # required for stdio MCP transport
+    tty: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    # Uncomment if you switch to SSE/HTTP transport:
+    # ports:
+    #   - "3100:3100"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── One‑shot test runner ────────────────────────
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: shieldnet-mcp:latest
+    container_name: shieldnet-mcp-test
+    profiles: ["test"]
+    command: ["node", "test/test.js"]
+    stdin_open: false
+    tty: false
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"

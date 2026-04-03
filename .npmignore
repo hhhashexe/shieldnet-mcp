@@ -1,0 +1,8 @@
+node_modules/
+test/
+*.mp4
+demo.sh
+record_demo.sh
+demo_format.py
+demo-video.mp4
+.gitignore
