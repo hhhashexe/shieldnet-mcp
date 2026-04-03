@@ -1,5 +1,7 @@
 # 🛡️ ShieldNet MCP — Security Scanner for AI Agents
 
+[![MCP_HACK//26 Participant](https://img.shields.io/badge/MCP__HACK%2F%2F26-Participant-blue?style=for-the-badge)](https://www.credly.com/badges/31a2f3b3-ab9a-4baa-b006-03e3da0fa2eb/public_url)
+
 > **Bring security governance to any AI agent deployment via MCP.**
 >
 > Track: **Secure & Govern MCP** | [MCP_HACK//26](https://aihackathon.dev)
