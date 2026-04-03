@@ -196,4 +196,4 @@ MIT — see [LICENSE](./LICENSE)
 ## Links
 
 - [npm: shieldnet](https://www.npmjs.com/package/shieldnet)
-- [GitHub: ShieldNet](https://github.com/hhhashexe/shieldnet)
+- [GitHub: ShieldNet MCP](https://github.com/hhhashexe/shieldnet-mcp)

@@ -17,6 +17,7 @@
     "security",
     "scanner",
     "ai-agent",
+    "ai-agents",
     "agentgateway",
     "governance",
     "xss",
