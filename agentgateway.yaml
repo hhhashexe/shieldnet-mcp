@@ -1,12 +1,26 @@
-# agentgateway configuration for ShieldNet MCP Security Scanner
-# This config routes AI agent requests through ShieldNet for security governance
+# ============================================================
+#  agentgateway configuration — ShieldNet MCP Security Layer
+#  MCP_HACK//26 · Track: Secure & Govern MCP
+#
+#  This config routes AI agent requests through ShieldNet MCP
+#  for comprehensive security governance before any external
+#  connection is established.
+#
+#  Architecture:
+#    AI Agent → agentgateway (ShieldNet guard) → External Service
+# ============================================================
 
 listeners:
   - name: secure-agent-gateway
-    protocol: A2A  # Agent-to-Agent protocol
+    protocol: A2A        # Agent-to-Agent protocol
     address: 0.0.0.0:8080
 
+  - name: mcp-listener  # MCP clients (Claude Desktop, etc.)
+    protocol: MCP
+    address: 127.0.0.1:3000
+
 targets:
+  # ── ShieldNet MCP Security Scanner ────────────────────────
   - name: shieldnet-security
     provider:
       type: mcp
@@ -14,44 +28,253 @@ targets:
         command: node
         args: ["src/index.js"]
         cwd: "."
+    metadata:
+      description: "ShieldNet security scanner and governance engine"
+      version: "1.0.0"
 
+  # ── Downstream agent (protected by ShieldNet) ─────────────
   - name: downstream-agent
     provider:
       type: a2a
       config:
         url: "${DOWNSTREAM_AGENT_URL}"
+    metadata:
+      description: "Downstream AI agent — all requests pre-screened by ShieldNet"
 
+# ============================================================
+#  POLICIES
+#  Evaluated in order — first match wins for blocking rules.
+#  Governance decisions cascade: BLOCK > WARN > ALLOW
+# ============================================================
 policies:
-  # Security governance: scan before allowing agent interactions
-  - name: pre-request-security-check
-    type: guardrail
-    config:
-      # Before any agent connects to external service, run ShieldNet scan
-      trigger: pre_request
-      action: |
-        Use shieldnet-security.assess_risk to evaluate the target URL.
-        If decision is BLOCK → reject the request.
-        If decision is WARN → log warning and proceed.
-        If decision is ALLOW → proceed normally.
 
-  - name: input-validation
+  # ── 1. Pre-request security scan ──────────────────────────
+  - name: pre-request-security-scan
     type: guardrail
+    priority: 100
     config:
-      # Validate inputs for injection attacks
       trigger: pre_request
+      description: "Scan all external URLs before the agent connects"
+      action: |
+        1. Extract the target URL from the agent request.
+        2. Call shieldnet-security.assess_risk with the URL and context="pre-request-check".
+        3. Enforce the governance decision:
+             BLOCK → reject the request immediately, return error with blocking_issues list.
+             WARN  → log warning with reasoning, attach advisory to the forwarded request.
+             ALLOW → forward the request normally.
+        4. Log all decisions to the audit trail.
+      on_failure: block   # If ShieldNet is unreachable, fail closed (deny by default)
+
+  # ── 2. Injection pattern blocking ─────────────────────────
+  - name: input-injection-guard
+    type: guardrail
+    priority: 90
+    config:
+      trigger: pre_request
+      description: "Block known injection payloads before they reach downstream"
+      mode: block
       patterns:
+        # XSS
         - "<script"
         - "javascript:"
-        - "' OR "
-        - "../"
-        - "{{constructor"
-      action: block
-      message: "ShieldNet: Potentially malicious input detected"
+        - "onerror="
+        - "onload="
+        - "<iframe"
+        - "data:text/html"
+        # SQL injection
+        - "' OR '"
+        - "' OR 1=1"
+        - "'; DROP"
+        - "UNION SELECT"
+        - "' AND 1="
+        # Template injection
+        - "{{7*7}}"
+        - "${7*7}"
+        - "#{7*7}"
+        # Path traversal
+        - "../../../"
+        - "....//....//";
+        - "%2e%2e%2f"
+        # Command injection
+        - "; id"
+        - "| id"
+        - "$(id)"
+        - "`id`"
+        - "; cat /etc/passwd"
+        # Prototype pollution
+        - "__proto__"
+        - "constructor[prototype]"
+      message: "ShieldNet: Potentially malicious input detected and blocked"
 
-  - name: output-sanitization
+  # ── 3. Sensitive data output filter ───────────────────────
+  - name: output-sensitive-data-filter
     type: guardrail
+    priority: 80
     config:
       trigger: post_response
+      description: "Redact sensitive data from agent responses before delivery"
       action: |
-        Scan response for sensitive data exposure (API keys, tokens, PII).
-        If found → redact and log warning.
+        Scan response body for:
+        - JWT tokens (eyJ...eyJ...signature pattern)
+        - API keys and secrets (sk-*, pk-*, Bearer tokens)
+        - Passwords in plain text
+        - Private keys (-----BEGIN ... PRIVATE KEY-----)
+        - AWS/GCP/Azure credentials
+        - Credit card numbers (PCI DSS)
+        - Social Security Numbers
+        If found → redact the sensitive value, replace with [REDACTED], log the finding.
+      redact_patterns:
+        - "eyJ[A-Za-z0-9_-]+\\.eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+"  # JWT
+        - "sk-[A-Za-z0-9]{20,}"                                         # OpenAI keys
+        - "Bearer [A-Za-z0-9._-]{20,}"                                  # Bearer tokens
+        - "-----BEGIN .* PRIVATE KEY-----"                              # Private keys
+        - "[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}"          # Credit cards
+        - "[0-9]{3}-[0-9]{2}-[0-9]{4}"                                  # SSN
+
+  # ── 4. Rate limiting per agent ────────────────────────────
+  - name: agent-rate-limit
+    type: rate_limit
+    priority: 70
+    config:
+      description: "Prevent agent abuse and runaway loops"
+      limits:
+        - window: 60s
+          max_requests: 60
+          scope: per_agent
+        - window: 3600s
+          max_requests: 500
+          scope: per_agent
+        - window: 60s
+          max_requests: 200
+          scope: global
+      on_limit: block
+      message: "ShieldNet: Rate limit exceeded — agent requests throttled"
+
+  # ── 5. Domain allowlist enforcement ───────────────────────
+  - name: domain-allowlist
+    type: access_control
+    priority: 60
+    config:
+      description: "Restrict agents to approved domains only"
+      mode: "${DOMAIN_POLICY:-audit}"   # audit | enforce (set to 'enforce' in prod)
+      allowed_domains:
+        - "*.github.com"
+        - "*.githubusercontent.com"
+        - "api.openai.com"
+        - "api.anthropic.com"
+        - "registry.npmjs.org"
+        - "${CUSTOM_ALLOWED_DOMAIN:-}"  # Operator-configured addition
+      blocked_domains:
+        - "169.254.169.254"   # AWS metadata
+        - "metadata.google.internal"   # GCP metadata
+        - "169.254.170.2"     # ECS metadata
+        - "100.100.100.200"   # Alibaba metadata
+        - "localhost"
+        - "127.0.0.1"
+        - "0.0.0.0"
+        - "10.0.0.0/8"        # RFC1918 private
+        - "172.16.0.0/12"     # RFC1918 private
+        - "192.168.0.0/16"    # RFC1918 private
+      on_block: reject
+      message: "ShieldNet: Domain not in allowlist or is an internal/metadata endpoint"
+
+  # ── 6. Critical vulnerability auto-block ──────────────────
+  - name: critical-vuln-auto-block
+    type: guardrail
+    priority: 110   # Highest priority — runs before other checks
+    config:
+      trigger: pre_request
+      description: "Auto-block any URL that previously received a CRITICAL finding"
+      action: |
+        Before processing, call shieldnet-security.scan_history to check
+        if the target URL has been scanned before.
+        If a previous scan returned ANY critical finding → reject immediately
+        without re-scanning (cached block decision).
+        Cache TTL: 3600 seconds.
+      cached_block_ttl: 3600
+
+  # ── 7. Audit logging ──────────────────────────────────────
+  - name: audit-trail
+    type: logging
+    priority: 10
+    config:
+      description: "Full audit trail of all agent requests and governance decisions"
+      log_fields:
+        - timestamp
+        - agent_id
+        - request_url
+        - shieldnet_decision      # ALLOW / WARN / BLOCK
+        - shieldnet_score
+        - shieldnet_grade
+        - findings_summary        # { critical, high, medium, low, info }
+        - blocking_issues
+        - action_taken            # forwarded / blocked / warned
+        - response_status
+        - duration_ms
+      format: json
+      destination: "${AUDIT_LOG_PATH:-/var/log/shieldnet/audit.jsonl}"
+      redact_in_logs:
+        - "Authorization"
+        - "Cookie"
+        - "X-API-Key"
+
+  # ── 8. Health check bypass ────────────────────────────────
+  - name: health-check-bypass
+    type: bypass
+    priority: 200   # Checked before all other policies
+    config:
+      description: "Skip security scanning for internal health checks"
+      paths:
+        - "/health"
+        - "/healthz"
+        - "/ping"
+        - "/ready"
+      source_ips:
+        - "127.0.0.1"
+        - "::1"
+
+# ============================================================
+#  GOVERNANCE THRESHOLDS  (mirrors ShieldNet's internal policy)
+# ============================================================
+governance:
+  policy_name: "ShieldNet Governance Policy v1.0"
+  thresholds:
+    ALLOW:
+      min_score: 70
+      max_criticals: 0
+    WARN:
+      min_score: 50
+      description: "Score 50–69 OR any high-severity findings"
+    BLOCK:
+      max_score: 49
+      description: "Score < 50 OR any critical vulnerabilities"
+  auto_block_vectors:
+    - sqli              # SQL Injection
+    - template_injection  # SSTI
+    - command_injection   # RCE
+    - path_traversal    # LFI/RFI
+    - ssrf              # Server-Side Request Forgery
+    - jwt_none          # JWT algorithm:none bypass
+  scan_mode: standard   # Use 'aggressive' for enhanced rate-limit checks
+
+# ============================================================
+#  OBSERVABILITY
+# ============================================================
+observability:
+  metrics:
+    enabled: true
+    endpoint: ":9090/metrics"
+    labels:
+      - decision          # allow/warn/block
+      - vector            # finding type
+      - agent_id
+  tracing:
+    enabled: "${TRACING_ENABLED:-false}"
+    endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
+  alerts:
+    - name: critical-finding-spike
+      condition: "rate(shieldnet_critical_findings[5m]) > 5"
+      notify: "${ALERT_WEBHOOK:-}"
+    - name: block-rate-high
+      condition: "rate(shieldnet_decisions{decision='block'}[5m]) > 10"
+      notify: "${ALERT_WEBHOOK:-}"
